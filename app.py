@@ -1,52 +1,38 @@
 """
-╔══════════════════════════════════════════════════════════════════╗
-║     MITRA TOURS & TRAVEL — Visitor Appointment System           ║
-║     app.py — Streamlit + Google Apps Script                     ║
-║                                                                  ║
-║  WRITE  → Google Apps Script (hardcoded, langsung jalan)        ║
-║  READ   → Google Sheets API v4 (untuk cek slot)                 ║
-╚══════════════════════════════════════════════════════════════════╝
+Mitra Tours & Travel — Visitor Appointment System
+app.py  |  Mobile-Friendly Version
+- Google Sheets read (slot check)
+- Google Apps Script write
+- Email notifikasi via GAS ke d4t4m1tr4@gmail.com
 """
 
 import streamlit as st
 import requests
 import random
 import string
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import re
 
-# ══════════════════════════════════════════════════════════════════
-# PAGE CONFIG
-# ══════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Visitor Appointment — Mitra Tours & Travel",
+    page_title="Kunjungan Sales — Mitra Tours",
     page_icon="🏢",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-# ══════════════════════════════════════════════════════════════════
-# KONFIGURASI — ubah di sini jika perlu ganti koneksi
-# ══════════════════════════════════════════════════════════════════
+# ── CONFIG ────────────────────────────────────────────────────────
 GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycbzm4Mnax-z0oq7Wao7Gz9C_tw4CgKLlyl0GfSTJGeIHAfhzSilZtQvr947Ym-1p2DqwkA/exec"
 SHEET_ID     = "1AQz-w3sLjGVdOsneDmdTFHFW6Nx7Z337Kjw2zzqFoXI"
 API_KEY      = "AIzaSyA1Mau8yZxao0MD5Mx_Dt027EuMbrUN9oo"
 SHEET_NAME   = "Sheet1"
+NOTIF_EMAIL  = "d4t4m1tr4@gmail.com"
 
 SHEETS_READ_URL = (
     f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}"
     f"/values/{SHEET_NAME}?key={API_KEY}"
 )
 
-# ══════════════════════════════════════════════════════════════════
-# LOGO — dari URL eksternal
-# ══════════════════════════════════════════════════════════════════
-LOGO_SRC = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSktXTDoA1ptcm0zfQ8kJSpBq-FIwiXa_XTqA&s"
-
-# ══════════════════════════════════════════════════════════════════
-# JADWAL — ubah tanggal & sesi di sini
-# ══════════════════════════════════════════════════════════════════
 DATES = [
     {"key": "6 Mei 2025",  "label": "Selasa, 6 Mei 2025"},
     {"key": "13 Mei 2025", "label": "Selasa, 13 Mei 2025"},
@@ -55,10 +41,10 @@ DATES = [
 ]
 
 SESSIONS = [
-    {"id": "P1", "value": "Pagi 09.00-10.00 WIB",  "label": "\U0001f305  Pagi   09.00 - 10.00 WIB"},
-    {"id": "P2", "value": "Pagi 10.00-11.00 WIB",  "label": "\U0001f305  Pagi   10.00 - 11.00 WIB"},
-    {"id": "S1", "value": "Siang 13.30-14.30 WIB", "label": "\u2600\ufe0f  Siang  13.30 - 14.30 WIB"},
-    {"id": "S2", "value": "Siang 14.30-15.30 WIB", "label": "\u2600\ufe0f  Siang  14.30 - 15.30 WIB"},
+    {"id": "P1", "value": "Pagi 09.00-10.00 WIB",  "label": "Pagi  09.00 - 10.00 WIB"},
+    {"id": "P2", "value": "Pagi 10.00-11.00 WIB",  "label": "Pagi  10.00 - 11.00 WIB"},
+    {"id": "S1", "value": "Siang 13.30-14.30 WIB", "label": "Siang 13.30 - 14.30 WIB"},
+    {"id": "S2", "value": "Siang 14.30-15.30 WIB", "label": "Siang 14.30 - 15.30 WIB"},
 ]
 
 HOTEL_BRANDS = [
@@ -83,12 +69,9 @@ TUJUAN_OPTIONS = [
     "Follow Up Existing Business",
 ]
 
-# ══════════════════════════════════════════════════════════════════
-# GOOGLE SHEETS — READ (cek slot tersedia)
-# ══════════════════════════════════════════════════════════════════
+# ── GOOGLE SHEETS READ ────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def _fetch_booked_cached() -> tuple:
-    """Pure function — tidak boleh ada st.* call di sini."""
     try:
         resp = requests.get(SHEETS_READ_URL, timeout=10)
         resp.raise_for_status()
@@ -111,17 +94,14 @@ def _fetch_booked_cached() -> tuple:
     except Exception as e:
         return {}, str(e)
 
-
 def fetch_booked_slots() -> dict:
     booked, err = _fetch_booked_cached()
     if err:
-        st.toast(f"\u26a0\ufe0f Gagal memuat jadwal: {err}", icon="\u26a0\ufe0f")
+        st.toast(f"Gagal memuat jadwal: {err}", icon="⚠️")
     return booked
-
 
 def is_booked(booked: dict, date_key: str, sess_val: str) -> bool:
     return booked.get(f"{date_key}|{sess_val}", 0) >= 1
-
 
 def get_alternatives(booked: dict, exc_dk: str, exc_sv: str, max_n: int = 3) -> list:
     alts = []
@@ -131,61 +111,38 @@ def get_alternatives(booked: dict, exc_dk: str, exc_sv: str, max_n: int = 3) -> 
                 continue
             if not is_booked(booked, d["key"], s["value"]):
                 alts.append({"date_key": d["key"], "date_label": d["label"],
-                             "sess_value": s["value"], "sess_label": s["label"]})
+                              "sess_value": s["value"], "sess_label": s["label"]})
                 if len(alts) >= max_n:
                     return alts
     return alts
 
+def generate_ref() -> str:
+    return "SV-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=7))
 
-# ══════════════════════════════════════════════════════════════════
-# GOOGLE APPS SCRIPT — WRITE (simpan data)
-# ══════════════════════════════════════════════════════════════════
+# ── GAS WRITE + EMAIL NOTIF ───────────────────────────────────────
 def save_to_gas(payload: dict) -> tuple:
-    """
-    Kirim data ke Google Apps Script endpoint.
-    GAS akan menulis ke Sheets dengan service account.
-    Return: (sukses: bool, ref_or_error: str)
-    """
     try:
-        resp = requests.post(
-            GAS_ENDPOINT,
-            json=payload,
-            timeout=30,
-            headers={"Content-Type": "application/json"},
-        )
-
-        # GAS kadang redirect — requests otomatis follow redirect
+        payload["notifEmail"] = NOTIF_EMAIL
+        resp = requests.post(GAS_ENDPOINT, json=payload, timeout=30,
+                             headers={"Content-Type": "application/json"})
         if not resp.ok:
-            return False, f"HTTP {resp.status_code}: {resp.text[:300]}"
-
+            return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
         try:
             result = resp.json()
         except Exception:
-            # Jika response bukan JSON (misal redirect HTML)
-            return False, f"Response bukan JSON: {resp.text[:200]}"
-
+            return False, f"Response bukan JSON: {resp.text[:150]}"
         if result.get("success"):
             return True, result.get("ref", "")
         elif result.get("error") == "SLOT_TAKEN":
             return False, "SLOT_TAKEN"
         else:
-            return False, result.get("message", result.get("error", "Unknown error dari GAS"))
-
+            return False, result.get("message", result.get("error", "Unknown error"))
     except requests.exceptions.Timeout:
-        return False, "Timeout (>30 detik) — coba lagi"
-    except requests.exceptions.ConnectionError as e:
-        return False, f"Koneksi gagal: {e}"
+        return False, "Timeout — coba lagi"
     except Exception as e:
         return False, str(e)
 
-
-def generate_ref() -> str:
-    return "SV-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=7))
-
-
-# ══════════════════════════════════════════════════════════════════
-# SESSION STATE
-# ══════════════════════════════════════════════════════════════════
+# ── SESSION STATE ─────────────────────────────────────────────────
 def init_state():
     defaults = {
         "step": 1,
@@ -202,443 +159,600 @@ def init_state():
         if k not in st.session_state:
             st.session_state[k] = v
 
-
-# ══════════════════════════════════════════════════════════════════
-# CSS
-# ══════════════════════════════════════════════════════════════════
+# ── CSS ───────────────────────────────────────────────────────────
 def inject_css():
     st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 html,body,[class*="css"]{font-family:'Plus Jakarta Sans',sans-serif!important}
 #MainMenu,footer,header{visibility:hidden}
 .stDeployButton,[data-testid="stToolbar"],[data-testid="collapsedControl"]{display:none}
-.main .block-container{padding-top:0!important;padding-left:1rem!important;padding-right:1rem!important;max-width:760px!important}
 
-.mtr-topbar{background:#1D4ED8;margin:-1rem -1rem 0;padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between}
-.mtr-topbar-right{font-size:12px;color:rgba(255,255,255,.6)}
-.mtr-hero{background:linear-gradient(135deg,#1D4ED8 0%,#2563EB 55%,#0BA5EC 100%);margin:0 -1rem;padding:36px 32px 72px;position:relative;overflow:hidden}
-.mtr-hero::after{content:'';position:absolute;right:-60px;top:-60px;width:300px;height:300px;border-radius:50%;background:rgba(255,255,255,.04);pointer-events:none}
-.mtr-hero-badge{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:4px 13px;font-size:11px;font-weight:600;color:rgba(255,255,255,.9);letter-spacing:.7px;text-transform:uppercase;margin-bottom:14px}
-.mtr-pulse{width:7px;height:7px;background:#4ADE80;border-radius:50%;display:inline-block;animation:mtr-pls 1.8s ease-in-out infinite}
-@keyframes mtr-pls{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
-.mtr-hero h1{font-size:28px!important;font-weight:700!important;color:white!important;letter-spacing:-.5px;margin-bottom:8px!important;line-height:1.25!important}
-.mtr-hero p{font-size:14px;color:rgba(255,255,255,.75);max-width:480px;line-height:1.65}
-.mtr-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
-.mtr-chip{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:16px;padding:4px 12px;font-size:11.5px;color:rgba(255,255,255,.85);font-weight:500}
-.mtr-steps{display:flex;align-items:center;background:white;border:1px solid #E2E8F0;border-radius:12px;padding:16px 20px;margin:-36px 0 16px;position:relative;z-index:10;box-shadow:0 4px 16px rgba(30,64,175,.08)}
-.mtr-step{display:flex;align-items:center;gap:8px;flex:1}
-.mtr-step-circle{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;border:1.5px solid #E2E8F0;color:#94A3B8;background:#F1F5F9}
-.mtr-step-circle.active{background:#2563EB;color:white;border-color:#2563EB}
-.mtr-step-circle.done{background:#EFF6FF;color:#2563EB;border-color:#BFDBFE}
-.mtr-step-label{font-size:12px;color:#94A3B8;font-weight:500;white-space:nowrap}
-.mtr-step-label.active{color:#2563EB;font-weight:600}
-.mtr-step-label.done{color:#64748B}
-.mtr-connector{flex:1;height:1.5px;background:#E2E8F0;margin:0 6px;max-width:48px}
-.mtr-connector.done{background:#BFDBFE}
-.mtr-card{background:white;border:1px solid #E2E8F0;border-radius:12px;padding:28px 30px;margin-bottom:14px;box-shadow:0 4px 16px rgba(30,64,175,.06)}
-.mtr-card-head{display:flex;align-items:flex-start;gap:13px;padding-bottom:18px;border-bottom:1px solid #F1F5F9;margin-bottom:22px}
-.mtr-card-icon{width:40px;height:40px;background:#EFF6FF;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-.mtr-step-tag{display:inline-block;background:#EFF6FF;color:#2563EB;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;letter-spacing:.5px;text-transform:uppercase;margin-bottom:5px}
-.mtr-card-title{font-size:17px!important;font-weight:700!important;color:#0F172A!important;letter-spacing:-.3px;margin:0!important}
-.mtr-card-sub{font-size:13px;color:#94A3B8;margin-top:2px}
-.mtr-sec{font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#94A3B8;margin:20px 0 10px;display:flex;align-items:center;gap:10px}
-.mtr-sec::after{content:'';flex:1;height:1px;background:#F1F5F9}
-.mtr-info{display:flex;gap:10px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px 14px;font-size:13px;color:#1E40AF;line-height:1.55;margin-bottom:14px}
-.mtr-date-card{border:1.5px solid #E2E8F0;border-radius:10px;margin-bottom:10px;overflow:hidden;background:white}
-.mtr-date-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 8px}
-.mtr-date-name{font-size:14px;font-weight:700;color:#0F172A}
-.mtr-badge-open{background:#ECFDF5;color:#065F46;border:1px solid #6EE7B7;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600}
-.mtr-badge-partial{background:#FFFBEB;color:#92400E;border:1px solid #FCD34D;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600}
-.mtr-badge-full{background:#FEF2F2;color:#991B1B;border:1px solid #FECACA;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600}
-.mtr-alert-block{background:#FEF2F2;border:1px solid #FECACA;border-left:3px solid #EF4444;border-radius:8px;padding:13px 15px;margin-bottom:12px;font-size:13px;color:#7F1D1D}
-.mtr-alert-ok{background:#ECFDF5;border:1px solid #6EE7B7;border-left:3px solid #10B981;border-radius:8px;padding:13px 15px;margin-bottom:12px;font-size:13px;color:#065F46}
-.mtr-alert-title{font-weight:700;margin-bottom:4px;font-size:13.5px}
-.mtr-sel-bar{background:#2563EB;border-radius:8px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;margin-top:10px}
-.mtr-sel-tag{font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:rgba(255,255,255,.65);margin-bottom:3px}
-.mtr-sel-val{font-size:13.5px;font-weight:700;color:white}
-.mtr-review-row{display:flex;border:1px solid #F1F5F9;border-radius:7px;overflow:hidden;margin-bottom:7px}
-.mtr-review-label{width:130px;flex-shrink:0;background:#F8FAFC;padding:10px 13px;font-size:11.5px;font-weight:600;color:#94A3B8;text-transform:uppercase;letter-spacing:.3px}
-.mtr-review-val{padding:10px 14px;font-size:13.5px;color:#1E293B;font-weight:500;flex:1}
-.mtr-success{text-align:center;padding:48px 20px}
-.mtr-success-icon{width:72px;height:72px;margin:0 auto 20px;background:#ECFDF5;border:2px solid #6EE7B7;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px}
-.mtr-ref{display:inline-block;background:#F1F5F9;border:1px solid #E2E8F0;border-radius:6px;padding:7px 18px;font-size:13px;color:#64748B;font-family:monospace;letter-spacing:2px;margin:12px 0 16px}
-.mtr-succ-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:400px;margin:16px auto 0;text-align:left}
-.mtr-succ-item{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:7px;padding:10px 13px}
-.mtr-succ-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:#94A3B8;font-weight:600;margin-bottom:3px}
-.mtr-succ-val{font-size:13.5px;font-weight:700;color:#0F172A}
-div[data-testid="stTextInput"] input,div[data-testid="stTextArea"] textarea{border:1.5px solid #E2E8F0!important;border-radius:7px!important;font-size:13.5px!important}
-div[data-testid="stTextInput"] input:focus,div[data-testid="stTextArea"] textarea:focus{border-color:#3B82F6!important;box-shadow:0 0 0 3px rgba(59,130,246,.1)!important}
-div[data-testid="stButton"]>button[kind="primary"]{background-color:#2563EB!important;border:none!important;border-radius:8px!important;font-weight:600!important;font-size:14px!important;padding:10px 24px!important}
-div[data-testid="stButton"]>button[kind="primary"]:hover{background-color:#1D4ED8!important;box-shadow:0 4px 14px rgba(37,99,235,.35)!important}
-div[data-testid="stButton"]>button[kind="secondary"]{border:1.5px solid #E2E8F0!important;border-radius:8px!important;color:#64748B!important;background:white!important;font-weight:600!important;font-size:14px!important}
+/* Mobile-first container */
+.main .block-container{
+  padding:0 0.75rem 2rem!important;
+  max-width:600px!important;
+}
+
+/* Hero */
+.hero{
+  background:linear-gradient(135deg,#1D4ED8 0%,#2563EB 60%,#0EA5E9 100%);
+  margin:0 -0.75rem;
+  padding:24px 20px 60px;
+  position:relative;overflow:hidden;
+}
+.hero::after{
+  content:'';position:absolute;right:-50px;top:-50px;
+  width:180px;height:180px;border-radius:50%;
+  background:rgba(255,255,255,0.05);pointer-events:none;
+}
+.hero-title{
+  font-size:24px!important;font-weight:700!important;
+  color:#fff!important;letter-spacing:-.5px;
+  margin-bottom:6px!important;line-height:1.25!important;
+}
+.hero-sub{font-size:13px;color:rgba(255,255,255,.75);line-height:1.6;margin-bottom:14px}
+.hero-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);
+  border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600;
+  color:rgba(255,255,255,.9);letter-spacing:.5px;text-transform:uppercase;
+  margin-bottom:12px;
+}
+.pulse{width:6px;height:6px;background:#4ADE80;border-radius:50%;
+  display:inline-block;animation:pls 1.8s ease-in-out infinite}
+@keyframes pls{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
+
+/* Steps bar */
+.steps-wrap{padding:0 4px}
+.steps{
+  display:flex;align-items:center;
+  background:#fff;border:1px solid #E2E8F0;border-radius:14px;
+  padding:14px 16px;margin-top:-30px;position:relative;z-index:10;
+  box-shadow:0 4px 20px rgba(30,64,175,.1);
+}
+.step{display:flex;align-items:center;gap:6px;flex:1}
+.step-circle{
+  width:26px;height:26px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;flex-shrink:0;
+}
+.step-circle.active{background:#2563EB;color:#fff}
+.step-circle.done{background:#DBEAFE;color:#1D4ED8;border:1.5px solid #93C5FD}
+.step-circle.idle{background:#F1F5F9;color:#94A3B8;border:1.5px solid #E2E8F0}
+.step-label{font-size:10.5px;font-weight:500;white-space:nowrap}
+.step-label.active{color:#2563EB;font-weight:700}
+.step-label.done{color:#64748B}
+.step-label.idle{color:#94A3B8}
+.connector{flex:1;height:1.5px;background:#E2E8F0;margin:0 4px;max-width:32px}
+.connector.done{background:#93C5FD}
+
+/* Card */
+.card{
+  background:#fff;border:1px solid #E8EDF3;border-radius:16px;
+  padding:20px 18px;margin-bottom:12px;
+  box-shadow:0 2px 12px rgba(30,64,175,.06);
+}
+.card-head{display:flex;align-items:center;gap:12px;padding-bottom:14px;
+  border-bottom:1px solid #F1F5F9;margin-bottom:16px}
+.card-icon{width:40px;height:40px;background:#EFF6FF;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.step-tag{display:inline-block;background:#EFF6FF;color:#2563EB;
+  font-size:9px;font-weight:700;padding:2px 8px;border-radius:8px;
+  letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px}
+.card-title{font-size:15px!important;font-weight:700!important;
+  color:#0F172A!important;letter-spacing:-.2px;margin:0!important}
+.card-sub{font-size:12px;color:#94A3B8;margin-top:1px}
+
+/* Info box */
+.info-box{display:flex;gap:9px;background:#EFF6FF;border:1px solid #BFDBFE;
+  border-radius:8px;padding:11px 13px;font-size:12px;color:#1E40AF;
+  line-height:1.55;margin-bottom:12px}
+
+/* Slot cards — full width on mobile */
+.slot-card{
+  border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.slot-available{border:1.5px solid #6EE7B7;background:#F0FDF4}
+.slot-selected{border:2px solid #2563EB;background:#EFF6FF}
+.slot-taken{border:1.5px solid #FECACA;background:#FEF2F2;opacity:.7;cursor:default}
+.slot-label{font-size:13.5px;font-weight:600;color:#0F172A}
+.slot-taken .slot-label{color:#9CA3AF;text-decoration:line-through}
+.slot-selected .slot-label{color:#1E40AF}
+.slot-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:8px;
+  text-transform:uppercase;letter-spacing:.3px}
+.badge-avail{background:#DCFCE7;color:#166534}
+.badge-sel{background:#DBEAFE;color:#1D4ED8}
+.badge-taken{background:#FEE2E2;color:#991B1B}
+
+/* Date header */
+.date-header{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:8px;margin-top:14px}
+.date-name{font-size:13px;font-weight:700;color:#1E293B}
+.avail-badge{font-size:10px;font-weight:600;padding:3px 8px;border-radius:8px}
+.avail-ok{background:#DCFCE7;color:#166534;border:1px solid #86EFAC}
+.avail-part{background:#FEF9C3;color:#854D0E;border:1px solid #FDE047}
+.avail-full{background:#FEE2E2;color:#991B1B;border:1px solid #FCA5A5}
+
+/* Selected bar */
+.sel-bar{
+  background:#1D4ED8;border-radius:10px;
+  padding:12px 16px;margin:10px 0;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sel-bar-label{font-size:10px;font-weight:600;color:rgba(255,255,255,.65);
+  text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px}
+.sel-bar-val{font-size:13px;font-weight:700;color:#fff}
+
+/* Alert */
+.alert-block{background:#FEF2F2;border:1px solid #FECACA;border-left:3px solid #EF4444;
+  border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12.5px;color:#7F1D1D}
+.alert-ok{background:#F0FDF4;border:1px solid #86EFAC;border-left:3px solid #22C55E;
+  border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:12.5px;color:#14532D}
+.alert-title{font-weight:700;margin-bottom:3px;font-size:13px}
+
+/* Review */
+.review-row{display:flex;border:1px solid #F1F5F9;border-radius:8px;
+  overflow:hidden;margin-bottom:7px}
+.review-lbl{width:110px;flex-shrink:0;background:#F8FAFC;
+  padding:9px 12px;font-size:10.5px;font-weight:600;color:#94A3B8;
+  text-transform:uppercase;letter-spacing:.3px}
+.review-val{padding:9px 13px;font-size:13px;color:#1E293B;font-weight:500;flex:1;
+  word-break:break-word}
+
+/* Success */
+.success-box{text-align:center;padding:36px 16px}
+.success-icon{width:68px;height:68px;margin:0 auto 18px;background:#F0FDF4;
+  border:2px solid #86EFAC;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;font-size:28px}
+.ref-badge{display:inline-block;background:#F1F5F9;border:1px solid #E2E8F0;
+  border-radius:6px;padding:6px 16px;font-size:12px;color:#64748B;
+  font-family:monospace;letter-spacing:2px;margin:10px 0 14px}
+.succ-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  max-width:360px;margin:14px auto 0;text-align:left}
+.succ-item{background:#F8FAFC;border:1px solid #E2E8F0;
+  border-radius:8px;padding:10px 12px}
+.succ-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:#94A3B8;font-weight:600;margin-bottom:2px}
+.succ-val{font-size:13px;font-weight:700;color:#0F172A}
+
+/* Section label */
+.sec-lbl{font-size:10px;font-weight:700;letter-spacing:.7px;
+  text-transform:uppercase;color:#94A3B8;margin:14px 0 8px;
+  display:flex;align-items:center;gap:8px}
+.sec-lbl::after{content:'';flex:1;height:1px;background:#F1F5F9}
+
+/* Buttons */
+div[data-testid="stButton"]>button[kind="primary"]{
+  background:#2563EB!important;border:none!important;border-radius:10px!important;
+  font-weight:600!important;font-size:14px!important;
+  padding:11px 20px!important;width:100%!important;
+}
+div[data-testid="stButton"]>button[kind="primary"]:hover{
+  background:#1D4ED8!important;
+}
+div[data-testid="stButton"]>button[kind="secondary"]{
+  border:1.5px solid #E2E8F0!important;border-radius:10px!important;
+  color:#64748B!important;background:#fff!important;
+  font-weight:600!important;font-size:14px!important;width:100%!important;
+}
+
+/* Inputs */
+div[data-testid="stTextInput"] input,
+div[data-testid="stTextArea"] textarea{
+  border:1.5px solid #E2E8F0!important;border-radius:8px!important;
+  font-size:14px!important;
+}
+div[data-testid="stTextInput"] input:focus,
+div[data-testid="stTextArea"] textarea:focus{
+  border-color:#3B82F6!important;
+  box-shadow:0 0 0 3px rgba(59,130,246,.1)!important;
+}
+
+/* Section divider */
+.sec-div{border:none;border-top:1px solid #F1F5F9;margin:14px 0}
+
+/* Footer */
+.footer{text-align:center;padding:18px 0 28px;font-size:11px;color:#94A3B8}
+
+/* Chip tags */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+  border-radius:14px;padding:4px 11px;font-size:11px;color:rgba(255,255,255,.88);
+  font-weight:500}
 </style>""", unsafe_allow_html=True)
 
 
-# ══════════════════════════════════════════════════════════════════
-# UI HELPERS
-# ══════════════════════════════════════════════════════════════════
-def render_topbar():
-    st.markdown(f"""
-<div class="mtr-topbar">
-  <img src="{LOGO_SRC}" alt="Mitra Tours & Travel" style="height:30px;width:auto;object-fit:contain;filter:brightness(0) invert(1);">
-  <span class="mtr-topbar-right">Sales Visit Appointment System</span>
-</div>""", unsafe_allow_html=True)
-
-
+# ── UI HELPERS ────────────────────────────────────────────────────
 def render_hero():
-    st.markdown(f"""
-<div class="mtr-hero">
-  <img src="{LOGO_SRC}" alt="Mitra Tours & Travel" style="height:44px;width:auto;object-fit:contain;filter:brightness(0) invert(1);margin-bottom:16px;display:block;">
-  <div class="mtr-hero-badge"><span class="mtr-pulse"></span> Sistem Kunjungan Aktif</div>
-  <h1>Buat Janji Kunjungan Sales</h1>
-  <p>Ajukan jadwal kunjungan ke kantor kami. Setiap slot hanya untuk <strong>satu hotel</strong> — sistem mendeteksi konflik secara real-time dari Google Sheets.</p>
-  <div class="mtr-chips">
-    <span class="mtr-chip">\u2713 Cek slot real-time</span>
-    <span class="mtr-chip">\U0001f4c5 Hanya hari Selasa</span>
-    <span class="mtr-chip">\U0001f512 Anti double booking</span>
-    <span class="mtr-chip">\U0001f4f1 Konfirmasi WhatsApp</span>
+    st.markdown("""
+<div class="hero">
+  <div class="hero-badge"><span class="pulse"></span>&nbsp;Sistem Kunjungan Aktif</div>
+  <div class="hero-title">Buat Janji Kunjungan Sales</div>
+  <div class="hero-sub">
+    Ajukan jadwal kunjungan ke kantor kami. Setiap slot hanya untuk
+    <strong>satu hotel</strong> — sistem mendeteksi konflik secara real-time.
+  </div>
+  <div class="chips">
+    <span class="chip">&#10003; Cek slot real-time</span>
+    <span class="chip">&#128197; Hanya hari Selasa</span>
+    <span class="chip">&#128274; Anti double booking</span>
+    <span class="chip">&#128241; Konfirmasi WhatsApp</span>
   </div>
 </div>""", unsafe_allow_html=True)
 
 
 def render_steps(current: int):
     def circ(i):
-        if i < current:   return '<div class="mtr-step-circle done">\u2713</div>'
-        if i == current:  return f'<div class="mtr-step-circle active">{i}</div>'
-        return f'<div class="mtr-step-circle">{i}</div>'
-    labels = ["Hotel", "Kontak", "Jadwal", "Konfirmasi"]
-    html = '<div class="mtr-steps">'
+        if i < current:
+            return '<div class="step-circle done">&#10003;</div>'
+        if i == current:
+            return f'<div class="step-circle active">{i}</div>'
+        return f'<div class="step-circle idle">{i}</div>'
+    labels = ["Hotel", "Kontak", "Jadwal", "Kirim"]
+    html = '<div class="steps-wrap"><div class="steps">'
     for i, lbl in enumerate(labels, 1):
-        lc = "active" if i == current else ("done" if i < current else "")
-        html += f'<div class="mtr-step">{circ(i)}<span class="mtr-step-label {lc}">{lbl}</span></div>'
+        lc = "active" if i == current else ("done" if i < current else "idle")
+        html += f'<div class="step">{circ(i)}<span class="step-label {lc}">{lbl}</span></div>'
         if i < 4:
-            html += f'<div class="mtr-connector {"done" if i < current else ""}"></div>'
-    html += "</div>"
+            conn_cls = "done" if i < current else ""
+            html += f'<div class="connector {conn_cls}"></div>'
+    html += "</div></div>"
     st.markdown(html, unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:14px'></div>", unsafe_allow_html=True)
 
 
-def card_header(icon, tag, title, subtitle):
+def card_head(icon, tag, title, sub=""):
+    sub_html = f'<div class="card-sub">{sub}</div>' if sub else ""
     st.markdown(f"""
-<div class="mtr-card-head">
-  <div class="mtr-card-icon">{icon}</div>
+<div class="card-head">
+  <div class="card-icon">{icon}</div>
   <div>
-    <div class="mtr-step-tag">{tag}</div>
-    <div class="mtr-card-title">{title}</div>
-    <div class="mtr-card-sub">{subtitle}</div>
+    <div class="step-tag">{tag}</div>
+    <div class="card-title">{title}</div>
+    {sub_html}
   </div>
 </div>""", unsafe_allow_html=True)
 
 
-def sec_label(text):
-    st.markdown(f'<div class="mtr-sec">{text}</div>', unsafe_allow_html=True)
+def sec_lbl(txt):
+    st.markdown(f'<div class="sec-lbl">{txt}</div>', unsafe_allow_html=True)
 
 
-def info_box(text):
-    st.markdown(f'<div class="mtr-info"><span>\u2139\ufe0f</span><div>{text}</div></div>', unsafe_allow_html=True)
+def info_box(txt):
+    st.markdown(
+        f'<div class="info-box"><span>&#8505;&#65039;</span><div>{txt}</div></div>',
+        unsafe_allow_html=True)
 
 
-def alert_box(kind, title, body, alts=None):
-    css = "mtr-alert-block" if kind == "blocking" else "mtr-alert-ok"
-    st.markdown(f'<div class="{css}"><div class="mtr-alert-title">{title}</div><div>{body}</div></div>',
-                unsafe_allow_html=True)
-    if alts:
-        st.markdown("**\U0001f4cc Slot alternatif tersedia:**")
-        for alt in alts:
-            if st.button(f"\u2192 {alt['date_label']}  ·  {alt['sess_label']}",
-                         key=f"alt_{alt['date_key']}_{alt['sess_value']}",
-                         use_container_width=True):
-                st.session_state.sel_date_key   = alt["date_key"]
-                st.session_state.sel_date_label = alt["date_label"]
-                st.session_state.sel_sess_value = alt["sess_value"]
-                st.session_state.sel_sess_label = alt["sess_label"]
-                st.session_state.conflict_type  = "ok"
-                st.session_state.conflict_msg   = f"Slot dipilih: {alt['date_label']} · {alt['sess_label']}"
-                st.session_state.alternatives   = []
-                st.rerun()
-
-
-# ══════════════════════════════════════════════════════════════════
-# VALIDASI
-# ══════════════════════════════════════════════════════════════════
-def validate_email(email):
-    return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email.strip()))
+# ── VALIDATION ────────────────────────────────────────────────────
+def valid_email(e):
+    return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", e.strip()))
 
 def validate_step1():
     ok = True
     if not st.session_state.nama_hotel.strip():
-        st.error("\u274c Nama hotel wajib diisi"); ok = False
+        st.error("Nama hotel wajib diisi"); ok = False
     if not st.session_state.alamat_hotel.strip():
-        st.error("\u274c Alamat hotel wajib diisi"); ok = False
+        st.error("Alamat hotel wajib diisi"); ok = False
     return ok
 
 def validate_step2():
     ok = True
     if not st.session_state.nama_pic.strip():
-        st.error("\u274c Nama PIC wajib diisi"); ok = False
+        st.error("Nama PIC wajib diisi"); ok = False
     if not st.session_state.jabatan.strip():
-        st.error("\u274c Jabatan wajib diisi"); ok = False
+        st.error("Jabatan wajib diisi"); ok = False
     if not st.session_state.no_hp.strip():
-        st.error("\u274c Nomor WhatsApp wajib diisi"); ok = False
+        st.error("Nomor WhatsApp wajib diisi"); ok = False
     if not st.session_state.email.strip():
-        st.error("\u274c Email wajib diisi"); ok = False
-    elif not validate_email(st.session_state.email):
-        st.error("\u274c Format email tidak valid"); ok = False
+        st.error("Email wajib diisi"); ok = False
+    elif not valid_email(st.session_state.email):
+        st.error("Format email tidak valid"); ok = False
     return ok
 
 def validate_step3(booked):
     ok = True
     if not st.session_state.sel_date_key or not st.session_state.sel_sess_value:
-        st.error("\u274c Pilih tanggal dan slot waktu kunjungan"); ok = False
+        st.error("Pilih tanggal dan slot waktu kunjungan"); ok = False
     elif is_booked(booked, st.session_state.sel_date_key, st.session_state.sel_sess_value):
         alts = get_alternatives(booked, st.session_state.sel_date_key, st.session_state.sel_sess_value)
         st.session_state.conflict_type  = "blocking"
         st.session_state.conflict_msg   = "Slot yang dipilih sudah terisi hotel lain."
         st.session_state.alternatives   = alts
-        st.session_state.sel_date_key   = None
-        st.session_state.sel_date_label = None
-        st.session_state.sel_sess_value = None
-        st.session_state.sel_sess_label = None
+        for k in ("sel_date_key","sel_date_label","sel_sess_value","sel_sess_label"):
+            st.session_state[k] = None
         ok = False
     if not st.session_state.tujuan:
-        st.error("\u274c Pilih minimal satu tujuan kunjungan"); ok = False
+        st.error("Pilih minimal satu tujuan kunjungan"); ok = False
     if not st.session_state.durasi:
-        st.error("\u274c Estimasi durasi wajib dipilih"); ok = False
+        st.error("Estimasi durasi wajib dipilih"); ok = False
     return ok
 
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 1 — HOTEL
-# ══════════════════════════════════════════════════════════════════
+# ── STEP 1 ────────────────────────────────────────────────────────
 def render_step1():
-    st.markdown('<div class="mtr-card">', unsafe_allow_html=True)
-    card_header("\U0001f3e8", "Langkah 1 dari 3", "Informasi Hotel", "Data properti hotel atau perusahaan Anda")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    card_head("🏨", "Langkah 1 dari 3", "Informasi Hotel", "Data properti hotel Anda")
+
     st.session_state.nama_hotel = st.text_input(
-        "Nama Hotel / Property *", value=st.session_state.nama_hotel,
-        placeholder="Contoh: Grand Hyatt Jakarta", key="inp_nama_hotel")
+        "Nama Hotel / Property *",
+        value=st.session_state.nama_hotel,
+        placeholder="Contoh: Grand Hyatt Jakarta",
+        key="inp_nama_hotel")
+
     st.session_state.alamat_hotel = st.text_area(
-        "Alamat Hotel *", value=st.session_state.alamat_hotel,
-        placeholder="Alamat lengkap hotel...", height=90, key="inp_alamat")
+        "Alamat Hotel *",
+        value=st.session_state.alamat_hotel,
+        placeholder="Alamat lengkap hotel...",
+        height=80, key="inp_alamat")
+
     opts = HOTEL_BRANDS
     idx  = opts.index(st.session_state.brand_hotel) if st.session_state.brand_hotel in opts else 0
     st.session_state.brand_hotel = st.selectbox(
-        "Brand / Chain Hotel", options=opts, index=idx, key="inp_brand",
-        format_func=lambda x: "\u2014 Pilih Brand / Chain \u2014" if x == "" else x)
+        "Brand / Chain Hotel (opsional)", options=opts, index=idx, key="inp_brand",
+        format_func=lambda x: "— Pilih Brand / Chain —" if x == "" else x)
+
     st.markdown("</div>", unsafe_allow_html=True)
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        if st.button("Lanjut \u2192", type="primary", use_container_width=True, key="btn1"):
-            if validate_step1():
-                st.session_state.step = 2; st.rerun()
+
+    if st.button("Lanjut ke Kontak →", type="primary", key="btn1"):
+        if validate_step1():
+            st.session_state.step = 2
+            st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 2 — PIC
-# ══════════════════════════════════════════════════════════════════
+# ── STEP 2 ────────────────────────────────────────────────────────
 def render_step2():
-    st.markdown('<div class="mtr-card">', unsafe_allow_html=True)
-    card_header("\U0001f464", "Langkah 2 dari 3", "Data PIC & Kontak", "Penanggung jawab kunjungan")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    card_head("👤", "Langkah 2 dari 3", "Data PIC & Kontak", "Penanggung jawab kunjungan")
+
     st.session_state.nama_pic = st.text_input(
         "Nama PIC Utama *", value=st.session_state.nama_pic,
         placeholder="Nama lengkap", key="inp_nama_pic")
-    c1, c2 = st.columns(2)
-    with c1:
+
+    col1, col2 = st.columns(2)
+    with col1:
         st.session_state.jabatan = st.text_input(
             "Jabatan *", value=st.session_state.jabatan,
-            placeholder="Sales Manager, GM, dll", key="inp_jabatan")
-    with c2:
+            placeholder="Sales Manager, GM...", key="inp_jabatan")
+    with col2:
         st.session_state.no_hp = st.text_input(
-            "Nomor WhatsApp *", value=st.session_state.no_hp,
+            "WhatsApp *", value=st.session_state.no_hp,
             placeholder="08xx-xxxx-xxxx", key="inp_no_hp")
+
     st.session_state.email = st.text_input(
-        "Alamat Email *", value=st.session_state.email,
+        "Email *", value=st.session_state.email,
         placeholder="nama@hotel.com", key="inp_email")
-    sec_label("Jumlah Peserta")
+
+    sec_lbl("Jumlah Peserta")
     p_opts = ["1 orang (PIC saja)", "2 orang", "3 orang", "4 orang", "5 orang"]
     cur_p  = p_opts.index(st.session_state.peserta) if st.session_state.peserta in p_opts else 0
     st.session_state.peserta = st.radio(
         "Peserta", options=p_opts, index=cur_p, horizontal=True,
         label_visibility="collapsed", key="inp_peserta")
+
     st.markdown("</div>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("\u2190 Kembali", key="btn2_back", use_container_width=True):
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("← Kembali", key="btn2_back"):
             st.session_state.step = 1; st.rerun()
-    with c2:
-        if st.button("Lanjut \u2192", type="primary", key="btn2_next", use_container_width=True):
+    with col2:
+        if st.button("Lanjut ke Jadwal →", type="primary", key="btn2_next"):
             if validate_step2():
                 _fetch_booked_cached.clear()
                 st.session_state.step = 3; st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 3 — JADWAL
-# ══════════════════════════════════════════════════════════════════
+# ── STEP 3 ────────────────────────────────────────────────────────
 def render_step3():
     booked = fetch_booked_slots()
 
-    st.markdown('<div class="mtr-card">', unsafe_allow_html=True)
-    card_header("\U0001f4c5", "Langkah 3 dari 3", "Pilih Jadwal Kunjungan",
-                "Slot terisi ditandai otomatis dari Google Sheets")
-    info_box("Kunjungan hanya setiap <strong>Selasa</strong> dalam 4 slot. Setiap slot hanya untuk <strong>1 hotel</strong>.")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    card_head("📅", "Langkah 3 dari 3", "Pilih Jadwal Kunjungan",
+              "Slot terisi otomatis dari Google Sheets")
 
+    info_box("Kunjungan hanya setiap <strong>Selasa</strong>. Setiap slot untuk <strong>1 hotel</strong>.")
+
+    # Conflict alerts
     if st.session_state.conflict_type == "blocking":
-        alert_box("blocking", "\u26d4 Slot tidak tersedia!",
-                  st.session_state.conflict_msg, st.session_state.alternatives)
+        st.markdown(
+            f'<div class="alert-block">'
+            f'<div class="alert-title">&#9940; Slot tidak tersedia!</div>'
+            f'{st.session_state.conflict_msg}</div>',
+            unsafe_allow_html=True)
+        if st.session_state.alternatives:
+            st.markdown("**Slot alternatif:**")
+            for alt in st.session_state.alternatives:
+                btn_lbl = f"{alt['date_label']}  ·  {alt['sess_label']}"
+                if st.button(btn_lbl, key=f"alt_{alt['date_key']}_{alt['sess_value']}"):
+                    st.session_state.sel_date_key   = alt["date_key"]
+                    st.session_state.sel_date_label = alt["date_label"]
+                    st.session_state.sel_sess_value = alt["sess_value"]
+                    st.session_state.sel_sess_label = alt["sess_label"]
+                    st.session_state.conflict_type  = "ok"
+                    st.session_state.conflict_msg   = f"Slot dipilih: {alt['date_label']} - {alt['sess_label']}"
+                    st.session_state.alternatives   = []
+                    st.rerun()
+
     elif st.session_state.conflict_type == "ok":
-        alert_box("ok", "\u2705 Slot tersedia!", st.session_state.conflict_msg)
+        st.markdown(
+            f'<div class="alert-ok">'
+            f'<div class="alert-title">&#10003; Slot tersedia!</div>'
+            f'{st.session_state.conflict_msg}</div>',
+            unsafe_allow_html=True)
 
-    sec_label("Pilih Tanggal & Slot Waktu")
-
+    # Slot picker
     for dt in DATES:
         free  = [s for s in SESSIONS if not is_booked(booked, dt["key"], s["value"])]
         taken = [s for s in SESSIONS if is_booked(booked, dt["key"], s["value"])]
         all_full = len(free) == 0
-        badge_cls = "mtr-badge-full" if all_full else ("mtr-badge-partial" if taken else "mtr-badge-open")
-        badge_txt = "Penuh" if all_full else (f"{len(free)} slot tersisa" if taken else f"{len(free)} slot tersedia")
-
-        st.markdown(f"""
-<div class="mtr-date-card">
-  <div class="mtr-date-head">
-    <div><div class="mtr-date-name">{dt["label"]}</div></div>
-    <span class="{badge_cls}">{badge_txt}</span>
-  </div>
-</div>""", unsafe_allow_html=True)
 
         if all_full:
-            st.caption("Semua slot pada tanggal ini sudah penuh.")
+            badge_cls = "avail-full"; badge_txt = "Penuh"
+        elif taken:
+            badge_cls = "avail-part"; badge_txt = f"{len(free)} slot tersisa"
         else:
-            cols = st.columns(2)
-            for i, sess in enumerate(SESSIONS):
-                is_taken  = is_booked(booked, dt["key"], sess["value"])
-                is_picked = (st.session_state.sel_date_key == dt["key"] and
-                             st.session_state.sel_sess_value == sess["value"])
-                with cols[i % 2]:
-                    if is_taken:
-                        st.markdown(
-                            f'<div style="border:1.5px solid #FECACA;background:#FEF2F2;border-radius:8px;'
-                            f'padding:10px 13px;margin-bottom:8px;opacity:.75;">' +
-                            f'<div style="font-size:11px;font-weight:700;color:#991B1B;text-transform:uppercase;margin-bottom:4px;">Penuh</div>' +
-                            f'<div style="font-size:14px;font-weight:700;color:#9CA3AF;text-decoration:line-through;">{sess["label"]}</div></div>',
-                            unsafe_allow_html=True)
-                    else:
-                        ps = "border:2px solid #2563EB;background:#EFF6FF;" if is_picked else "border:1.5px solid #6EE7B7;background:#ECFDF5;"
-                        lc = "#1D4ED8" if is_picked else "#065F46"
-                        tc = "#1E40AF" if is_picked else "#0F172A"
-                        st.markdown(
-                            f'<div style="{ps}border-radius:8px;padding:10px 13px;margin-bottom:8px;">' +
-                            f'<div style="font-size:11px;font-weight:700;color:{lc};text-transform:uppercase;margin-bottom:4px;">{"\u2713 Dipilih" if is_picked else "Tersedia"}</div>' +
-                            f'<div style="font-size:14px;font-weight:700;color:{tc};">{sess["label"]}</div></div>',
-                            unsafe_allow_html=True)
-                        if st.button("\u2713 Pilih" if is_picked else "Pilih",
-                                     key=f"slot_{dt['key']}_{sess['id']}",
-                                     use_container_width=True):
-                            _fetch_booked_cached.clear()
-                            fresh = fetch_booked_slots()
-                            if is_booked(fresh, dt["key"], sess["value"]):
-                                alts = get_alternatives(fresh, dt["key"], sess["value"])
-                                st.session_state.conflict_type = "blocking"
-                                st.session_state.conflict_msg  = f"Slot {sess['label']} pada {dt['label']} baru saja diisi hotel lain."
-                                st.session_state.alternatives  = alts
-                            else:
-                                st.session_state.sel_date_key   = dt["key"]
-                                st.session_state.sel_date_label = dt["label"]
-                                st.session_state.sel_sess_value = sess["value"]
-                                st.session_state.sel_sess_label = sess["label"]
-                                st.session_state.conflict_type  = "ok"
-                                st.session_state.conflict_msg   = f"<strong>{dt['label']}</strong> · <strong>{sess['label']}</strong> siap di-booking."
-                                st.session_state.alternatives   = []
-                            st.rerun()
+            badge_cls = "avail-ok";  badge_txt = f"{len(free)} slot tersedia"
 
+        st.markdown(
+            f'<div class="date-header">'
+            f'<span class="date-name">{dt["label"]}</span>'
+            f'<span class="avail-badge {badge_cls}">{badge_txt}</span>'
+            f'</div>',
+            unsafe_allow_html=True)
+
+        if all_full:
+            st.caption("Semua slot penuh.")
+            continue
+
+        for sess in SESSIONS:
+            is_taken  = is_booked(booked, dt["key"], sess["value"])
+            is_picked = (st.session_state.sel_date_key == dt["key"] and
+                         st.session_state.sel_sess_value == sess["value"])
+            s_lbl = sess["label"]
+
+            if is_taken:
+                st.markdown(
+                    f'<div class="slot-card slot-taken">'
+                    f'<span class="slot-label">{s_lbl}</span>'
+                    f'<span class="slot-badge badge-taken">Penuh</span>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+            else:
+                card_cls  = "slot-selected" if is_picked else "slot-available"
+                badge_cls2 = "badge-sel" if is_picked else "badge-avail"
+                badge_txt2 = "Dipilih" if is_picked else "Tersedia"
+                btn_label  = "Dipilih ✓" if is_picked else "Pilih"
+
+                st.markdown(
+                    f'<div class="slot-card {card_cls}">'
+                    f'<span class="slot-label">{s_lbl}</span>'
+                    f'<span class="slot-badge {badge_cls2}">{badge_txt2}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True)
+
+                btn_key = f"slot_{dt['key']}_{sess['id']}"
+                if st.button(btn_label, key=btn_key, use_container_width=True):
+                    _fetch_booked_cached.clear()
+                    fresh = fetch_booked_slots()
+                    if is_booked(fresh, dt["key"], sess["value"]):
+                        alts = get_alternatives(fresh, dt["key"], sess["value"])
+                        st.session_state.conflict_type = "blocking"
+                        s_lbl2 = sess["label"]
+                        d_lbl2 = dt["label"]
+                        st.session_state.conflict_msg  = f"Slot {s_lbl2} pada {d_lbl2} baru saja diisi hotel lain."
+                        st.session_state.alternatives  = alts
+                    else:
+                        st.session_state.sel_date_key   = dt["key"]
+                        st.session_state.sel_date_label = dt["label"]
+                        st.session_state.sel_sess_value = sess["value"]
+                        st.session_state.sel_sess_label = sess["label"]
+                        st.session_state.conflict_type  = "ok"
+                        d_lbl3 = dt["label"]
+                        s_lbl3 = sess["label"]
+                        st.session_state.conflict_msg   = f"{d_lbl3} - {s_lbl3} siap di-booking."
+                        st.session_state.alternatives   = []
+                    st.rerun()
+
+    # Selected summary bar
     if st.session_state.sel_date_key and st.session_state.sel_sess_value:
-        st.markdown(f"""
-<div class="mtr-sel-bar">
-  <div>
-    <div class="mtr-sel-tag">Jadwal dipilih</div>
-    <div class="mtr-sel-val">{st.session_state.sel_date_label}&nbsp; · &nbsp;{st.session_state.sel_sess_label}</div>
-  </div>
-</div>""", unsafe_allow_html=True)
-        if st.button("\u2715 Batalkan pilihan", key="clear_slot"):
+        sel_dl = st.session_state.sel_date_label
+        sel_sl = st.session_state.sel_sess_label
+        st.markdown(
+            f'<div class="sel-bar">'
+            f'<div><div class="sel-bar-label">Jadwal dipilih</div>'
+            f'<div class="sel-bar-val">{sel_dl} &nbsp;·&nbsp; {sel_sl}</div></div>'
+            f'<div style="color:rgba(255,255,255,.6);cursor:pointer;font-size:18px">&#10005;</div>'
+            f'</div>',
+            unsafe_allow_html=True)
+        if st.button("Batalkan pilihan", key="clear_slot"):
             st.session_state.sel_date_key = st.session_state.sel_date_label = None
             st.session_state.sel_sess_value = st.session_state.sel_sess_label = None
             st.session_state.conflict_type = None; st.session_state.alternatives = []
             st.rerun()
 
-    st.markdown("<hr style='border:none;border-top:1px solid #F1F5F9;margin:18px 0'>", unsafe_allow_html=True)
-    sec_label("Tujuan Kunjungan")
+    st.markdown('<hr class="sec-div">', unsafe_allow_html=True)
+
+    sec_lbl("Tujuan Kunjungan")
     tujuan_selected = []
-    cols = st.columns(2)
+    col1, col2 = st.columns(2)
     for i, tuj in enumerate(TUJUAN_OPTIONS):
-        with cols[i % 2]:
+        with (col1 if i % 2 == 0 else col2):
             if st.checkbox(tuj, value=(tuj in st.session_state.tujuan), key=f"tuj_{i}"):
                 tujuan_selected.append(tuj)
     st.session_state.tujuan = tujuan_selected
 
-    sec_label("Estimasi Durasi")
+    sec_lbl("Estimasi Durasi")
     d_opts = ["15 Menit", "30 Menit", "45 Menit"]
     cur_d  = d_opts.index(st.session_state.durasi) if st.session_state.durasi in d_opts else 0
     st.session_state.durasi = st.radio(
         "Durasi", options=d_opts, index=cur_d, horizontal=True,
         label_visibility="collapsed", key="inp_durasi")
 
-    sec_label("Catatan Tambahan")
+    sec_lbl("Catatan Tambahan")
     st.session_state.catatan = st.text_area(
         "Catatan", value=st.session_state.catatan,
         placeholder="Informasi tambahan (opsional)...", height=80,
         label_visibility="collapsed", key="inp_catatan")
 
     st.markdown("</div>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("\u2190 Kembali", key="btn3_back", use_container_width=True):
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("← Kembali", key="btn3_back"):
             st.session_state.step = 2; st.rerun()
-    with c2:
-        if st.button("Review Data \u2192", type="primary", key="btn3_next", use_container_width=True):
+    with col2:
+        if st.button("Review & Kirim →", type="primary", key="btn3_next"):
             fresh_b = fetch_booked_slots()
             if validate_step3(fresh_b):
                 st.session_state.step = 4; st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 4 — REVIEW & SUBMIT
-# ══════════════════════════════════════════════════════════════════
+# ── STEP 4 — REVIEW & SUBMIT ──────────────────────────────────────
 def render_step4():
-    st.markdown('<div class="mtr-card">', unsafe_allow_html=True)
-    card_header("\U0001f4cb", "Konfirmasi", "Review Permohonan", "Periksa kembali sebelum mengirim")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    card_head("📋", "Konfirmasi", "Review Permohonan", "Periksa sebelum mengirim")
 
     rows = [
         ("Hotel",    st.session_state.nama_hotel),
         ("Alamat",   st.session_state.alamat_hotel),
-        ("Brand",    st.session_state.brand_hotel or "\u2014"),
+        ("Brand",    st.session_state.brand_hotel or "—"),
         ("Nama PIC", st.session_state.nama_pic),
         ("Jabatan",  st.session_state.jabatan),
         ("WhatsApp", st.session_state.no_hp),
         ("Email",    st.session_state.email),
         ("Peserta",  st.session_state.peserta),
-        ("Tanggal",  st.session_state.sel_date_label or "\u2014"),
-        ("Slot",     st.session_state.sel_sess_label or "\u2014"),
-        ("Durasi",   st.session_state.durasi or "\u2014"),
-        ("Tujuan",   ", ".join(st.session_state.tujuan) or "\u2014"),
+        ("Tanggal",  st.session_state.sel_date_label or "—"),
+        ("Slot",     st.session_state.sel_sess_label or "—"),
+        ("Durasi",   st.session_state.durasi or "—"),
+        ("Tujuan",   ", ".join(st.session_state.tujuan) or "—"),
     ]
     if st.session_state.catatan:
         rows.append(("Catatan", st.session_state.catatan))
 
-    html = "".join(f'<div class="mtr-review-row"><div class="mtr-review-label">{l}</div><div class="mtr-review-val">{v}</div></div>' for l, v in rows)
-    st.markdown(html, unsafe_allow_html=True)
-    info_box("Dengan mengirimkan formulir ini, Anda menyetujui data yang diisi adalah benar dan bersedia dihubungi via WhatsApp atau Email untuk konfirmasi jadwal kunjungan.")
+    for lbl, val in rows:
+        st.markdown(
+            f'<div class="review-row">'
+            f'<div class="review-lbl">{lbl}</div>'
+            f'<div class="review-val">{val}</div>'
+            f'</div>',
+            unsafe_allow_html=True)
+
+    info_box("Dengan mengirimkan formulir ini, Anda bersedia dihubungi via WhatsApp atau Email untuk konfirmasi jadwal.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("\u2190 Edit Data", key="btn4_back", use_container_width=True):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("← Edit Data", key="btn4_back"):
             st.session_state.step = 3; st.rerun()
-    with c2:
-        if st.button("\u2709\ufe0f  Kirim Permohonan", type="primary", key="btn4_submit", use_container_width=True):
+    with col2:
+        if st.button("Kirim Permohonan ✉️", type="primary", key="btn4_submit"):
             do_submit()
 
 
 def do_submit():
-    # ── Verifikasi slot terakhir ──
     _fetch_booked_cached.clear()
     fresh = fetch_booked_slots()
     dk = st.session_state.sel_date_key
@@ -646,15 +760,15 @@ def do_submit():
 
     if is_booked(fresh, dk, sv):
         alts = get_alternatives(fresh, dk, sv)
+        s_lbl = st.session_state.sel_sess_label
+        d_lbl = st.session_state.sel_date_label
         st.session_state.conflict_type = "blocking"
-        st.session_state.conflict_msg  = f"Slot {st.session_state.sel_sess_label} pada {st.session_state.sel_date_label} baru saja dipesan hotel lain."
+        st.session_state.conflict_msg  = f"Slot {s_lbl} pada {d_lbl} baru saja dipesan hotel lain."
         st.session_state.alternatives  = alts
         for k in ("sel_date_key","sel_date_label","sel_sess_value","sel_sess_label"):
             st.session_state[k] = None
-        st.session_state.step = 3
-        st.rerun(); return
+        st.session_state.step = 3; st.rerun(); return
 
-    # ── Kirim ke Google Apps Script ──
     wib = datetime.now(ZoneInfo("Asia/Jakarta"))
     ref = generate_ref()
 
@@ -663,7 +777,7 @@ def do_submit():
         "timestamp":   wib.strftime("%d/%m/%Y %H:%M:%S"),
         "namaHotel":   st.session_state.nama_hotel,
         "alamatHotel": st.session_state.alamat_hotel,
-        "brand":       st.session_state.brand_hotel or "\u2014",
+        "brand":       st.session_state.brand_hotel or "—",
         "namaPIC":     st.session_state.nama_pic,
         "jabatan":     st.session_state.jabatan,
         "noHP":        st.session_state.no_hp,
@@ -674,9 +788,10 @@ def do_submit():
         "slot":        sv,
         "durasi":      st.session_state.durasi or "",
         "catatan":     st.session_state.catatan or "",
+        "notifEmail":  NOTIF_EMAIL,
     }
 
-    with st.spinner("\U0001f4e4 Menyimpan permohonan..."):
+    with st.spinner("Menyimpan & mengirim notifikasi..."):
         ok, result = save_to_gas(payload)
 
     if ok:
@@ -689,37 +804,50 @@ def do_submit():
         _fetch_booked_cached.clear()
         fresh2 = fetch_booked_slots()
         alts   = get_alternatives(fresh2, dk, sv)
+        s_lbl  = st.session_state.sel_sess_label
+        d_lbl  = st.session_state.sel_date_label
         st.session_state.conflict_type = "blocking"
-        st.session_state.conflict_msg  = f"Slot {st.session_state.sel_sess_label} pada {st.session_state.sel_date_label} baru saja dipesan saat Anda submit."
+        st.session_state.conflict_msg  = f"Slot {s_lbl} pada {d_lbl} baru saja dipesan saat Anda submit."
         st.session_state.alternatives  = alts
         for k in ("sel_date_key","sel_date_label","sel_sess_value","sel_sess_label"):
             st.session_state[k] = None
         st.session_state.step = 3; st.rerun()
     else:
-        st.error(f"\u274c **Gagal menyimpan:** {result}")
+        st.error(f"Gagal menyimpan: {result}")
 
 
-# ══════════════════════════════════════════════════════════════════
-# STEP 5 — SUCCESS
-# ══════════════════════════════════════════════════════════════════
+# ── STEP 5 — SUCCESS ──────────────────────────────────────────────
 def render_success():
-    st.markdown('<div class="mtr-card">', unsafe_allow_html=True)
+    ref   = st.session_state.ref_number
+    pic   = st.session_state.nama_pic
+    hotel = st.session_state.nama_hotel
+    tgl   = st.session_state.sel_date_label
+    slot  = st.session_state.sel_sess_label
+
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown(f"""
-<div class="mtr-success">
-  <div class="mtr-success-icon">\u2713</div>
-  <h2 style="font-size:20px;font-weight:700;color:#0F172A;letter-spacing:-.3px;margin-bottom:6px">Permohonan Berhasil Dikirim!</h2>
-  <p style="font-size:14px;color:#64748B;max-width:400px;margin:0 auto;line-height:1.65">
-    Terima kasih! Permohonan kunjungan Anda sudah kami terima.<br>Konfirmasi akan dikirimkan dalam 1\u20132 hari kerja.
+<div class="success-box">
+  <div class="success-icon">&#10003;</div>
+  <h2 style="font-size:20px;font-weight:700;color:#0F172A;margin-bottom:6px">
+    Permohonan Terkirim!
+  </h2>
+  <p style="font-size:13px;color:#64748B;line-height:1.65;margin-bottom:4px">
+    Terima kasih! Permohonan kunjungan Anda sudah kami terima.<br>
+    Notifikasi dikirim ke <strong>d4t4m1tr4@gmail.com</strong><br>
+    Konfirmasi akan dikirimkan dalam 1-2 hari kerja.
   </p>
-  <div class="mtr-ref">{st.session_state.ref_number}</div>
-  <p style="font-size:12.5px;color:#94A3B8">Simpan nomor referensi ini untuk tindak lanjut.</p>
-  <div class="mtr-succ-grid">
-    <div class="mtr-succ-item"><div class="mtr-succ-label">Nama PIC</div><div class="mtr-succ-val">{st.session_state.nama_pic}</div></div>
-    <div class="mtr-succ-item"><div class="mtr-succ-label">Hotel</div><div class="mtr-succ-val">{st.session_state.nama_hotel}</div></div>
-    <div class="mtr-succ-item"><div class="mtr-succ-label">Tanggal</div><div class="mtr-succ-val">{st.session_state.sel_date_label}</div></div>
-    <div class="mtr-succ-item"><div class="mtr-succ-label">Slot</div><div class="mtr-succ-val">{st.session_state.sel_sess_label}</div></div>
+  <div class="ref-badge">{ref}</div>
+  <p style="font-size:11.5px;color:#94A3B8;margin-bottom:0">
+    Simpan nomor referensi untuk tindak lanjut.
+  </p>
+  <div class="succ-grid">
+    <div class="succ-item"><div class="succ-lbl">Nama PIC</div><div class="succ-val">{pic}</div></div>
+    <div class="succ-item"><div class="succ-lbl">Hotel</div><div class="succ-val">{hotel}</div></div>
+    <div class="succ-item"><div class="succ-lbl">Tanggal</div><div class="succ-val">{tgl}</div></div>
+    <div class="succ-item"><div class="succ-lbl">Slot</div><div class="succ-val">{slot}</div></div>
   </div>
-</div>""", unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("+ Ajukan Kunjungan Baru", key="btn_reset"):
@@ -728,24 +856,26 @@ def render_success():
         st.rerun()
 
 
-# ══════════════════════════════════════════════════════════════════
-# MAIN
-# ══════════════════════════════════════════════════════════════════
+# ── MAIN ──────────────────────────────────────────────────────────
 def main():
     init_state()
     inject_css()
-    render_topbar()
     render_hero()
-    with st.container():
-        s = st.session_state.step
-        if s < 5:
-            render_steps(s)
-        if   s == 1: render_step1()
-        elif s == 2: render_step2()
-        elif s == 3: render_step3()
-        elif s == 4: render_step4()
-        elif s == 5: render_success()
-    st.markdown('<div style="text-align:center;padding:20px 0 32px;font-size:12px;color:#94A3B8">VisitorPass · Mitra Tours &amp; Travel &nbsp;·&nbsp; Data tersimpan di Google Sheets</div>', unsafe_allow_html=True)
+
+    s = st.session_state.step
+    if s < 5:
+        render_steps(s)
+
+    if   s == 1: render_step1()
+    elif s == 2: render_step2()
+    elif s == 3: render_step3()
+    elif s == 4: render_step4()
+    elif s == 5: render_success()
+
+    st.markdown(
+        '<div class="footer">VisitorPass &nbsp;·&nbsp; Mitra Tours &amp; Travel'
+        '&nbsp;·&nbsp; Data tersimpan di Google Sheets</div>',
+        unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
