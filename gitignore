@@ -1,0 +1,26 @@
+# ════════════════════════════════════════════════════
+# .gitignore — Mitra Tours & Travel Visitor Form
+# ════════════════════════════════════════════════════
+
+# !! FILE RAHASIA — JANGAN PERNAH DI-COMMIT !!
+config.js
+
+# Jika menggunakan .env sebagai alternatif
+.env
+.env.local
+.env.production
+*.env
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
